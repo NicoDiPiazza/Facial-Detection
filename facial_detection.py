@@ -3,6 +3,7 @@ import cv2
 import math
 from PIL import Image
 import numpy
+import time
 
 
 class TrainingFrame():
@@ -43,6 +44,8 @@ def eyeScore(eyeOne: list, eyeTwo: list, pixel: list):
     else:
         return (1/(1+math.exp(m*eyeTwoDistance - 4)))
 
+def dSigmoid(a):
+    return(math.exp(-a)/((1+math.exp(-a))*(1+math.exp(-a))))
 
 
 #vars
@@ -51,6 +54,11 @@ firstLine = saveFile.readlines()
 saveFile.close()
 
 N_images = 4
+
+imageWidth = 640
+imageHeight = 480
+
+
 
 #reconstituted numbers
 recon_numbers = numpy.zeros(N_images* 6)
@@ -62,7 +70,7 @@ trainingOrder = numpy.zeros(1000, list)
 
 #this turns the data in the text file into an intelligible list of ints
 x = 0
-for j in range(4):
+for j in range(N_images):
     list_numbers = [list(char) for char in firstLine[j]]
     for i in list_numbers:
         if i[0] == '0':
@@ -101,8 +109,14 @@ for i in range(N_images):
 
 
 ## initialize the neural network
-imageLayerSize = 36 * 27 + 1
-hiddenLayerSize = 100 + 1
+inputWidth = 48
+inputHeight = 32
+imageLayerSize = inputWidth * inputHeight + 1
+hiddenLayerSize = 10 + 1
+
+scalingX = imageWidth / inputWidth
+scalingY = imageHeight / inputHeight
+
 
     # these are all node layers
 inputLayer = numpy.zeros(imageLayerSize)
@@ -138,4 +152,21 @@ for i in range(1000):
         for j in range(i):
             if trainingIndexOrder[j] == trainingIndexOrder[i] and i != j:
                 repeats = True
+
+
+start_time = time.perf_counter()
+
+for i in range(N_images):
+    currentImage = trainingData[i].filename
+    for j in range(imageLayerSize - 1):
+        pixX = (j%inputWidth) * scalingX - scalingX/2
+        pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
+
+        #print(getLumninance([pixX, pixY], currentImage))
+
+end_time = time.perf_counter()
+
+run_time = end_time - start_time
+print(f"The program ran in {run_time:.4f} seconds")
+
 
