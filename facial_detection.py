@@ -4,6 +4,7 @@ import math
 from PIL import Image
 import numpy
 import time
+import sys
 
 
 class TrainingFrame():
@@ -22,8 +23,16 @@ def getLumninance(pixel: list, chosen_image):
 
 def randomizeWeights(weights: list):
     ballparkWeightMagnitude = 10
-    for i in range(len(weights)):
-        weights[i] = numpy.random.random() * (2*ballparkWeightMagnitude) - (ballparkWeightMagnitude)
+    length = len(weights)
+    width = len(weights[0])
+    for i in range(length):
+        for j in range(width):
+            weights[i][j] = numpy.random.random() * (2*ballparkWeightMagnitude) - (ballparkWeightMagnitude)
+
+def biasDatThang(layer):
+    length = len(layer)
+    layer[length -1] = 1
+
 
 
 def eyeScore(eyeOne: list, eyeTwo: list, pixel: list):
@@ -47,18 +56,23 @@ def eyeScore(eyeOne: list, eyeTwo: list, pixel: list):
 def dSigmoid(a):
     return(math.exp(-a)/((1+math.exp(-a))*(1+math.exp(-a))))
 
+def sigmoid(a):
+    return(1/(1+math.exp(-a)))
+
+
+
 
 #vars
 saveFile = open(r'facial detection\training_data_save_file.txt', 'r')
 firstLine = saveFile.readlines()
 saveFile.close()
+numpy.set_printoptions(threshold=sys.maxsize)
+
 
 N_images = 4
 
 imageWidth = 640
 imageHeight = 480
-
-
 
 #reconstituted numbers
 recon_numbers = numpy.zeros(N_images* 6)
@@ -118,20 +132,29 @@ scalingX = imageWidth / inputWidth
 scalingY = imageHeight / inputHeight
 
 
+
+
     # these are all node layers
 inputLayer = numpy.zeros(imageLayerSize)
 hiddenLayerOne = numpy.zeros(hiddenLayerSize)
 hiddenLayerTwo = numpy.zeros(hiddenLayerSize)
 hiddenLayerThree = numpy.zeros(hiddenLayerSize)
-outputLayer = numpy.zeros(imageLayerSize)
+outputLayer = numpy.zeros(imageLayerSize -1)
+
+biasDatThang(inputLayer)
+biasDatThang(hiddenLayerOne)
+biasDatThang(hiddenLayerTwo)
+biasDatThang(hiddenLayerThree)
+
+
 
     #these are all weight layers
     # note that increases in the amount of hidden layers are much less impactful for calculation time than increases in layer size
     # which is why I have chosen to increase hidden layers instead of nodes per hidden layer.
-weightsInputOne = numpy.zeros(imageLayerSize * hiddenLayerSize)
-weightsOneTwo = numpy.zeros(hiddenLayerSize * hiddenLayerSize)
-weightsTwoThree = numpy.zeros(hiddenLayerSize * hiddenLayerSize)
-weightsThreeOutput = numpy.zeros(hiddenLayerSize * imageLayerSize)
+weightsInputOne = numpy.zeros((imageLayerSize, hiddenLayerSize))
+weightsOneTwo = numpy.zeros((hiddenLayerSize, hiddenLayerSize))
+weightsTwoThree = numpy.zeros((hiddenLayerSize, hiddenLayerSize))
+weightsThreeOutput = numpy.zeros((hiddenLayerSize, imageLayerSize -1))
 
 randomizeWeights(weightsInputOne)
 randomizeWeights(weightsOneTwo)
@@ -157,16 +180,41 @@ for i in range(1000):
 start_time = time.perf_counter()
 
 for i in range(N_images):
+    saveFile = open(r'facial detection\networkSaveFile.txt', 'w')
+    saveFile.close()
+    saveFile = open(r'facial detection\networkSaveFile.txt', 'a')
     currentImage = trainingData[i].filename
+    currentEyeOne = trainingData[i].eyeOne
+    currentEyeTwo = trainingData[i].eyeTwo
+    currentMouth = trainingData[i].mouth
+
     for j in range(imageLayerSize - 1):
         pixX = (j%inputWidth) * scalingX - scalingX/2
         pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
+        inputLayer[j] = getLumninance([pixX, pixY], currentImage)
+
+
+    for prevLayer in range(len(layers)-1):
+        currentWeightSet = weightSets[prevLayer]
+        #we subtract one so that we never overwrite the bias neuron
+        for currentNode in range(len(layers[prevLayer+1]) -1):
+            currentSum = 0
+            for prevNode in range(len(layers[prevLayer])):
+                currentSum = currentSum + layers[prevLayer][prevNode] * currentWeightSet[prevNode]
+            
+
+
+    for j in range(imageLayerSize - 1):
+        pixX = (j%inputWidth) * scalingX - scalingX/2
+        pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
+        loss = eyeScore(currentEyeOne, currentEyeTwo, [pixX, pixY]) - outputLayer[j]
 
         #print(getLumninance([pixX, pixY], currentImage))
-
+    saveFile.write(str(weightSets))
+    saveFile.close()
 end_time = time.perf_counter()
 
 run_time = end_time - start_time
 print(f"The program ran in {run_time:.4f} seconds")
-
+print(inputLayer)
 
