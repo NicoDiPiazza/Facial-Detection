@@ -19,6 +19,11 @@ def getLumninance(pixel: list, chosen_image):
     averageRGB = (r + g + b)/3
     return(averageRGB/255)
 
+def randomizeWeights(weights: list):
+    ballparkWeightMagnitude = 10
+    for i in range(len(weights)):
+        weights[i] = numpy.random.random() * (2*ballparkWeightMagnitude) - (ballparkWeightMagnitude)
+
 
 def eyeScore(eyeOne: list, eyeTwo: list, pixel: list):
     #gives any pixel a score based on how close the nearest eye. A pixel near an eye will return close to one, 
@@ -96,6 +101,32 @@ for i in range(N_images):
 
 
 ## initialize the neural network
+imageLayerSize = 36 * 27 + 1
+hiddenLayerSize = 100 + 1
+
+    # these are all node layers
+inputLayer = numpy.zeros(imageLayerSize)
+hiddenLayerOne = numpy.zeros(hiddenLayerSize)
+hiddenLayerTwo = numpy.zeros(hiddenLayerSize)
+hiddenLayerThree = numpy.zeros(hiddenLayerSize)
+outputLayer = numpy.zeros(imageLayerSize)
+
+    #these are all weight layers
+    # note that increases in the amount of hidden layers are much less impactful for calculation time than increases in layer size
+    # which is why I have chosen to increase hidden layers instead of nodes per hidden layer.
+weightsInputOne = numpy.zeros(imageLayerSize * hiddenLayerSize)
+weightsOneTwo = numpy.zeros(hiddenLayerSize * hiddenLayerSize)
+weightsTwoThree = numpy.zeros(hiddenLayerSize * hiddenLayerSize)
+weightsThreeOutput = numpy.zeros(hiddenLayerSize * imageLayerSize)
+
+randomizeWeights(weightsInputOne)
+randomizeWeights(weightsOneTwo)
+randomizeWeights(weightsTwoThree)
+randomizeWeights(weightsThreeOutput)
+
+layers = [inputLayer, hiddenLayerOne, hiddenLayerTwo, hiddenLayerThree, outputLayer]
+weightSets = [weightsInputOne, weightsOneTwo, weightsTwoThree, weightsThreeOutput]
+
 
 ##create a list of 1000 non-repeating random integers between 1 and 1200
 
@@ -107,3 +138,4 @@ for i in range(1000):
         for j in range(i):
             if trainingIndexOrder[j] == trainingIndexOrder[i] and i != j:
                 repeats = True
+
