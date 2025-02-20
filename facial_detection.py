@@ -8,11 +8,12 @@ import sys
 
 
 class TrainingFrame():
-    def __init__(self, eyeOne: list, eyeTwo: list, mouth: list, filename: str):
+    def __init__(self, eyeOne: list, eyeTwo: list, mouth: list, filename: str, luminances: list):
         self.eyeOne = eyeOne
         self.eyeTwo = eyeTwo
         self.mouth = mouth
         self.filename = filename
+        self.luminances = luminances
 
 
 def getLumninance(pixel: list, chosen_image):
@@ -111,16 +112,6 @@ for j in range(N_images):
             x = x+1
 
 
-#this arranges the list of ints into their respective coordinate pairs, and assigns them to the various training data images
-for i in range(N_images):
-    filename = r'C:\Users\ThinkPad\OneDrive - Oregon State University\Documents\python\facial detection\datasetClean\webcam_image' + str(i) + '.jpg'
-    eyeOne = [recon_numbers[i*6], recon_numbers[i*6 + 1]]
-    eyeTwo = [recon_numbers[i*6+2], recon_numbers[i*6+3]]
-    mouth = [recon_numbers[i*6+4], recon_numbers[i*6+5]]
-    
-    trainingData[i] = TrainingFrame(eyeOne, eyeTwo, mouth, filename)
-
-
 
 ## initialize the neural network
 inputWidth = 48
@@ -176,6 +167,22 @@ for i in range(1000):
             if trainingIndexOrder[j] == trainingIndexOrder[i] and i != j:
                 repeats = True
 
+#this arranges the list of ints into their respective coordinate pairs, and assigns them to the various training data images
+for i in range(N_images):
+    filename = r'C:\Users\ThinkPad\OneDrive - Oregon State University\Documents\python\facial detection\datasetClean\webcam_image' + str(i) + '.jpg'
+    eyeOne = [recon_numbers[i*6], recon_numbers[i*6 + 1]]
+    eyeTwo = [recon_numbers[i*6+2], recon_numbers[i*6+3]]
+    mouth = [recon_numbers[i*6+4], recon_numbers[i*6+5]]
+    luminances = numpy.zeros(imageLayerSize)
+    for j in range(imageLayerSize - 1):
+        pixX = (j%inputWidth) * scalingX - scalingX/2
+        pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
+        # getting the luminances takes about 4-5 sec per image, so moving it outside the loop means that it is WAY faster after when 
+        # actually training.
+        luminances[j] = getLumninance([pixX, pixY], filename)
+    
+    trainingData[i] = TrainingFrame(eyeOne, eyeTwo, mouth, filename, luminances)
+
 
 start_time = time.perf_counter()
 
@@ -187,11 +194,10 @@ for i in range(N_images):
     currentEyeOne = trainingData[i].eyeOne
     currentEyeTwo = trainingData[i].eyeTwo
     currentMouth = trainingData[i].mouth
+    currentLuminances = trainingData[i].luminances
 
     for j in range(imageLayerSize - 1):
-        pixX = (j%inputWidth) * scalingX - scalingX/2
-        pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
-        inputLayer[j] = getLumninance([pixX, pixY], currentImage)
+        inputLayer[j] = currentLuminances[j]
 
 
     for prevLayer in range(len(layers)-1):
@@ -209,12 +215,11 @@ for i in range(N_images):
         pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
         loss = eyeScore(currentEyeOne, currentEyeTwo, [pixX, pixY]) - outputLayer[j]
 
-        #print(getLumninance([pixX, pixY], currentImage))
     saveFile.write(str(weightSets))
     saveFile.close()
 end_time = time.perf_counter()
 
 run_time = end_time - start_time
 print(f"The program ran in {run_time:.4f} seconds")
-print(inputLayer)
+#print(inputLayer)
 
