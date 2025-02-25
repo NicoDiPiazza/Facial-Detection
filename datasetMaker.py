@@ -1,10 +1,7 @@
 import pygame
 import cv2
-import math
 from PIL import Image
-import numpy
 import os
-
 
 #vars
 stop = False
