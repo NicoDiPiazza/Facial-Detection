@@ -24,7 +24,7 @@ def boxIt(pixel: list, img):
 stop = False
 dt = 1
 trainingData = numpy.zeros(20, TrainingFrame)
-N_images = 4
+N_images = 18
 
 saveFile = open(r'facial detection\training_data_save_file.txt', 'w')
 saveFile.close()
