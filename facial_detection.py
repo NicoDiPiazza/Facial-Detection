@@ -1,11 +1,11 @@
-import pygame
-import cv2
 import math
 from PIL import Image
 import numpy
 import time
 import sys
 
+
+start_time = time.perf_counter()
 
 class TrainingFrame():
     def __init__(self, eyeOne: list, eyeTwo: list, mouth: list, filename: str, luminances: list):
@@ -23,7 +23,7 @@ def getLumninance(pixel: list, chosen_image):
     return(averageRGB/255)
 
 def randomizeWeights(weights: list):
-    ballparkWeightMagnitude = 10
+    ballparkWeightMagnitude = 1
     length = len(weights)
     width = len(weights[0])
     for i in range(length):
@@ -36,20 +36,21 @@ def biasDatThang(layer):
 
 
 
-def eyeScore(eyeOne: list, eyeTwo: list, pixel: list):
+def eyeScore(eyeOne: list, eyeTwo: list, pixel: list, generation: int):
     #gives any pixel a score based on how close the nearest eye. A pixel near an eye will return close to one, 
     # and a pixel far from an eye will return near zero.
 
     # we use a reversed(and slightly augmented) sigmoid to produce the score as a function of distance
-
-    desiredSpan = 200
-    m = 1/(math.floor(desiredSpan/8))
+    # by basing the distance dropoff off of the generation, we encourage the network to get closer over time, by us being 
+    # more specific about where the eyes are
+    m = (sigmoid((generation/1200)-4) * (generation**(1/6)) *600 + 200)/5000
     #distances
     eyeOneDistance = math.sqrt((eyeOne[0] - pixel[0])*(eyeOne[0] - pixel[0]) + (eyeOne[1] - pixel[1])*(eyeOne[1] - pixel[1]))
     eyeTwoDistance = math.sqrt((eyeTwo[0] - pixel[0])*(eyeTwo[0] - pixel[0]) + (eyeTwo[1] - pixel[1])*(eyeTwo[1] - pixel[1]))
 
     if eyeOneDistance <= eyeTwoDistance:
-        #note that e is not raised to a negative power
+        #note that e is not raised to a negative power, this is an altered sigmoid function
+        
         return (1/(1+math.exp(m*eyeOneDistance - 4)))
     else:
         return (1/(1+math.exp(m*eyeTwoDistance - 4)))
@@ -58,7 +59,24 @@ def dSigmoid(a):
     return(math.exp(-a)/((1+math.exp(-a))*(1+math.exp(-a))))
 
 def sigmoid(a):
-    return(1/(1+math.exp(-a)))
+    try:
+        return(1/(1+math.exp(-a)))
+    except:
+        # occasionally we hit a math overflow error, I'm not sure if a gets to negative or too positive
+        print(str(a) + ' is too much.')
+
+# i think that using relu may eliminate the math overflow error we were hitting
+def ReLu(a):
+    return(max(0, a))
+
+def dReLu(a):
+    #if a is negative, then 0 will be max. 0 / a = 0. If a is positive, then a will be max, a/a = 1
+    return(ReLu(a)/(a + 0.000000000000000000001))
+
+def learningRate(x):
+    return 1/(100*(x**(1/3)))
+
+
 
 
 
@@ -70,7 +88,7 @@ saveFile.close()
 numpy.set_printoptions(threshold=sys.maxsize)
 
 
-N_images = 4
+N_images = 18
 
 imageWidth = 640
 imageHeight = 480
@@ -130,12 +148,15 @@ inputLayer = numpy.zeros(imageLayerSize)
 hiddenLayerOne = numpy.zeros(hiddenLayerSize)
 hiddenLayerTwo = numpy.zeros(hiddenLayerSize)
 hiddenLayerThree = numpy.zeros(hiddenLayerSize)
-outputLayer = numpy.zeros(imageLayerSize -1)
+# we don't subtract 1 from the size of the output layer because our loops and functions all act as though it has a bias neuron, 
+# and so we'll end up ignoring a pixel output if we subtract one.
+outputLayer = numpy.zeros(imageLayerSize)
 
 biasDatThang(inputLayer)
 biasDatThang(hiddenLayerOne)
 biasDatThang(hiddenLayerTwo)
 biasDatThang(hiddenLayerThree)
+biasDatThang(outputLayer)
 
 
 
@@ -145,23 +166,147 @@ biasDatThang(hiddenLayerThree)
 weightsInputOne = numpy.zeros((imageLayerSize, hiddenLayerSize))
 weightsOneTwo = numpy.zeros((hiddenLayerSize, hiddenLayerSize))
 weightsTwoThree = numpy.zeros((hiddenLayerSize, hiddenLayerSize))
-weightsThreeOutput = numpy.zeros((hiddenLayerSize, imageLayerSize -1))
+weightsThreeOutput = numpy.zeros((hiddenLayerSize, imageLayerSize))
 
-randomizeWeights(weightsInputOne)
-randomizeWeights(weightsOneTwo)
-randomizeWeights(weightsTwoThree)
-randomizeWeights(weightsThreeOutput)
+adjustWeightsOne = numpy.zeros(imageLayerSize)
+adjustWeightsTwo = numpy.zeros(hiddenLayerSize)
+adjustWeightsThree = numpy.zeros(hiddenLayerSize)
+adjustWeightsOutput = numpy.zeros(hiddenLayerSize)
+cost = numpy.zeros(imageLayerSize)
+
+saveFile = open(r'facial detection\networkSaveFile.txt', 'r')
+weightsText = saveFile.readlines()
+saveFile.close()
 
 layers = [inputLayer, hiddenLayerOne, hiddenLayerTwo, hiddenLayerThree, outputLayer]
 weightSets = [weightsInputOne, weightsOneTwo, weightsTwoThree, weightsThreeOutput]
+adjustWeightSets = [adjustWeightsOne, adjustWeightsTwo, adjustWeightsThree, adjustWeightsOutput, cost]
 
 
-##create a list of 1000 non-repeating random integers between 1 and 1200
+startFromScratch = True
+if startFromScratch:
+    randomizeWeights(weightsInputOne)
+    randomizeWeights(weightsOneTwo)
+    randomizeWeights(weightsTwoThree)
+    randomizeWeights(weightsThreeOutput)
+else:
+    currentWeight = -1
+    currentNode = -1
+    currentWeightSet = -1
+    decimal = 1
+    for j in range(len(weightsText)):
+        listNumbers = [list(char) for char in weightsText[j]]
+        for i in range(len(listNumbers)):
+            if listNumbers[i][0] == 'y':
+                currentWeightSet = currentWeightSet + 1
+                currentNode = -2
+                currentWeight = -1
+            if listNumbers[i][0] == '[':
+                currentNode = currentNode + 1
+                currentWeight = 0
+            if listNumbers[i][0] == ',':
+                currentWeight = currentWeight + 1
+                decimal = 1
 
-for i in range(1000):
+            if listNumbers[i][0] == '0':
+                decimal = decimal / 10
+            if listNumbers[i][0] == '1':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (1 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '2':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (2 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '3':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (3 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '4':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (4 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '5':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (5 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '6':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (6 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '7':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (7 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '8':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (8 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '9':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] + (9 * decimal)
+                decimal = decimal / 10
+            if listNumbers[i][0] == '-' and listNumbers[i -1][0] == 'e':
+                orderOfMag = 10**(10*int(listNumbers[i +1][0]) + int(listNumbers[i +2][0]))
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] / orderOfMag
+            if listNumbers[i][0] == '+' and listNumbers[i -1][0] == 'e':
+                orderOfMag = 10**(10*int(listNumbers[i +1][0]) + int(listNumbers[i +2][0]))
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] * orderOfMag
+            if listNumbers[i-10][0] == '-' and listNumbers[i-8][0] == '.':
+                weightSets[currentWeightSet][currentNode][currentWeight] = weightSets[currentWeightSet][currentNode][currentWeight] * (-1)
+
+
+recordedLuminances = numpy.zeros((N_images, imageLayerSize - 1))
+
+saveFile = open(r'facial detection\luminanceFile.txt', 'r')
+luminancesText = saveFile.readlines()
+saveFile.close()
+
+currentPixelIndex = -1
+currentLuminanceImage = 0
+decimal = 0.1
+for j in range(len(luminancesText)):
+    listNumbers = [list(char) for char in luminancesText[j]]
+    for i in range(len(listNumbers)):
+        if listNumbers[i][0] == ']':
+            currentLuminanceImage = currentLuminanceImage + 1
+            currentPixelIndex = -1
+            
+        if listNumbers[i][0] == '.':
+            currentPixelIndex = currentPixelIndex + 1
+            decimal = 0.1
+
+        if listNumbers[i][0] == '0':
+            decimal = decimal / 10
+        if listNumbers[i][0] == '1':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (1 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '2':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (2 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '3':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (3 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '4':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (4 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '5':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (5 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '6':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (6 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '7':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (7 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '8':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (8 * decimal)
+            decimal = decimal / 10
+        if listNumbers[i][0] == '9':
+            recordedLuminances[currentLuminanceImage][currentPixelIndex] = recordedLuminances[currentLuminanceImage][currentPixelIndex] + (9 * decimal)
+            decimal = decimal / 10
+       
+
+
+
+
+##create a list of N_images non-repeating random integers between 1 and 1200
+
+for i in range(18):
     repeats = True
     while repeats:
-        trainingIndexOrder[i] = numpy.random.randint(1200)
+        trainingIndexOrder[i] = numpy.random.randint(18)
         repeats = False
         for j in range(i):
             if trainingIndexOrder[j] == trainingIndexOrder[i] and i != j:
@@ -173,20 +318,21 @@ for i in range(N_images):
     eyeOne = [recon_numbers[i*6], recon_numbers[i*6 + 1]]
     eyeTwo = [recon_numbers[i*6+2], recon_numbers[i*6+3]]
     mouth = [recon_numbers[i*6+4], recon_numbers[i*6+5]]
-    luminances = numpy.zeros(imageLayerSize)
+    luminances = recordedLuminances[i]
     for j in range(imageLayerSize - 1):
         pixX = (j%inputWidth) * scalingX - scalingX/2
         pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
-        # getting the luminances takes about 4-5 sec per image, so moving it outside the loop means that it is WAY faster after when 
-        # actually training.
-        luminances[j] = getLumninance([pixX, pixY], filename)
+
     
     trainingData[i] = TrainingFrame(eyeOne, eyeTwo, mouth, filename, luminances)
 
 
-start_time = time.perf_counter()
+#start_time = time.perf_counter()
 
-for i in range(N_images):
+#advise using a number around 5000 for loops
+f = 0
+while f < 5000:
+    i = trainingIndexOrder[f%N_images]
     saveFile = open(r'facial detection\networkSaveFile.txt', 'w')
     saveFile.close()
     saveFile = open(r'facial detection\networkSaveFile.txt', 'a')
@@ -195,6 +341,7 @@ for i in range(N_images):
     currentEyeTwo = trainingData[i].eyeTwo
     currentMouth = trainingData[i].mouth
     currentLuminances = trainingData[i].luminances
+    currentLearningRate = learningRate(f + 1)
 
     for j in range(imageLayerSize - 1):
         inputLayer[j] = currentLuminances[j]
@@ -206,20 +353,72 @@ for i in range(N_images):
         for currentNode in range(len(layers[prevLayer+1]) -1):
             currentSum = 0
             for prevNode in range(len(layers[prevLayer])):
-                currentSum = currentSum + layers[prevLayer][prevNode] * currentWeightSet[prevNode]
+                currentSum = currentSum + layers[prevLayer][prevNode] * currentWeightSet[prevNode][currentNode]
+            #assigning the node the appropriate value
+            layers[prevLayer+1][currentNode] = ReLu(currentSum)
             
 
-
+#Finding loss
     for j in range(imageLayerSize - 1):
         pixX = (j%inputWidth) * scalingX - scalingX/2
         pixY = math.floor(j / inputWidth) * scalingY - scalingY/2
-        loss = eyeScore(currentEyeOne, currentEyeTwo, [pixX, pixY]) - outputLayer[j]
+        loss = (eyeScore(currentEyeOne, currentEyeTwo, [pixX, pixY], i) - outputLayer[j]) ** 2
+        adjustWeightSets[len(adjustWeightSets) -1][j] = 2 * (outputLayer[j] - eyeScore(currentEyeOne, currentEyeTwo, [pixX, pixY], i)) * currentLearningRate
+
+
+
+
+#backpropogating
+    
+# for each node, we want to adjust each of the weights that feed into it accordingly, starting with the last layer of nodes
+
+#we should save the partials from each layer that we do so that we don't have to recalculate them every layer
+
+
+# for each layer, starting from the end
+    for j in range(len(layers)-1):
+        
+        currentLayer = layers[len(layers) -j -2] # this starts on the last hidden layer and ends on the input layer
+        prevLayer = layers[len(layers) - j -1] #this starts at the output layer and ends on the first hidden layer
+        currentAdjustWeightSet = adjustWeightSets[len(layers) - j -1]
+        
+        for currentNodeIndex in range(len(currentLayer)):
+            currentNode = currentLayer[currentNodeIndex]
+
+            
+            for prevNodeIndex in range(len(prevLayer) -1):
+                # we skip the last neuron, because the weights that go into the bias neuron don't matter, it will always be 1
+                prevNode = prevLayer[prevNodeIndex]
+                currentWeight = weightSets[len(layers) -j -2][currentNodeIndex][prevNodeIndex] # the weight that goes from the current 
+                # node in the current layer to the prev node from the prev layer
+                dCda = adjustWeightSets[len(layers) - j -1][prevNodeIndex]
+                dadw = dReLu(prevNode)*currentNode
+                dadb = dReLu(prevNode) * currentWeight
+                adjustWeightSets[len(layers) - j -2][currentNodeIndex] = adjustWeightSets[len(layers) - j -2][currentNodeIndex] + dCda
+                
+                weightSets[len(layers) -j -2][currentNodeIndex][prevNodeIndex] = currentWeight - (adjustWeightSets[len(layers) - j -2][currentNodeIndex] * dadw)
+                adjustWeightSets[len(layers) - j -2][currentNodeIndex] = adjustWeightSets[len(layers) - j -2][currentNodeIndex] * dadb
+
+
+                #apply the relevant backpropogation
+                backProp = 0
+
+
+
+    #reset all the adjustments
+    adjustWeightsOne = numpy.zeros(imageLayerSize)
+    adjustWeightsTwo = numpy.zeros(hiddenLayerSize)
+    adjustWeightsThree = numpy.zeros(hiddenLayerSize)
+    adjustWeightsOutput = numpy.zeros(hiddenLayerSize)
+    cost = numpy.zeros(imageLayerSize)
 
     saveFile.write(str(weightSets))
     saveFile.close()
+
+    f = f + 1
+    print(f)
+
 end_time = time.perf_counter()
 
 run_time = end_time - start_time
 print(f"The program ran in {run_time:.4f} seconds")
-#print(inputLayer)
-
